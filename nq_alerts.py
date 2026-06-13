@@ -6,10 +6,6 @@ import feedparser
 import yfinance as yf
 from datetime import datetime, timezone
 
-# =========================
-# DISCORD WEBHOOKS
-# =========================
-
 CRITICAL_WEBHOOK = os.getenv("DISCORD_CRITICAL_WEBHOOK")
 BRIEF_WEBHOOK = os.getenv("DISCORD_BRIEF_WEBHOOK")
 MACRO_WEBHOOK = os.getenv("DISCORD_MACRO_WEBHOOK")
@@ -19,44 +15,31 @@ NEWS_WEBHOOK = os.getenv("DISCORD_NEWS_WEBHOOK")
 TRUMP_WEBHOOK = os.getenv("DISCORD_TRUMP_WEBHOOK")
 MARKET_DATA_WEBHOOK = os.getenv("DISCORD_MARKET_DATA_WEBHOOK")
 
-# =========================
-# RSS FEEDS
-# =========================
-
 FEEDS = {
     "CNBC Markets": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     "CNBC Tech": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
     "MarketWatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
     "Federal Reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
     "Nasdaq Markets": "https://www.nasdaq.com/feed/rssoutbound?category=Markets",
+    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
+    "Investing.com News": "https://www.investing.com/rss/news.rss",
+    "S&P Global": "https://www.spglobal.com/spdji/en/rss/",
 }
 
 TRUMP_FEED = "https://trumpstruth.org/feed"
-
-# =========================
-# MARKET SYMBOLS
-# =========================
 
 MARKET_SYMBOLS = {
     "NQ Futures": "NQ=F",
     "QQQ": "QQQ",
     "VIX": "^VIX",
     "US 10Y Yield": "^TNX",
-    "US 2Y Yield": "^IRX",
     "DXY": "DX-Y.NYB",
     "NVDA": "NVDA",
     "AMD": "AMD",
     "MSFT": "MSFT",
     "AAPL": "AAPL",
     "META": "META",
-    "AMZN": "AMZN",
-    "GOOGL": "GOOGL",
-    "TSLA": "TSLA",
 }
-
-# =========================
-# KEYWORDS
-# =========================
 
 CRITICAL_KEYWORDS = [
     "cpi", "ppi", "nfp", "nonfarm", "payrolls", "fomc", "powell",
@@ -89,13 +72,13 @@ EARNINGS_KEYWORDS = [
 ]
 
 GENERAL_KEYWORDS = list(set(
-    CRITICAL_KEYWORDS + MACRO_KEYWORDS + AI_SEMIS_KEYWORDS + EARNINGS_KEYWORDS +
-    ["nasdaq", "qqq", "futures", "wall street", "stocks", "technology"]
+    CRITICAL_KEYWORDS + MACRO_KEYWORDS + AI_SEMIS_KEYWORDS +
+    EARNINGS_KEYWORDS + [
+        "nasdaq", "qqq", "futures", "wall street",
+        "stocks", "technology", "market", "treasury"
+    ]
 ))
 
-# =========================
-# HELPERS
-# =========================
 
 def clean_text(text):
     text = html.unescape(text or "")
@@ -111,7 +94,7 @@ def send_discord(webhook, title, body):
     body = body.strip() or "No relevant updates detected."
     payload = {"content": f"**{title}**\n{body[:1900]}"}
 
-    response = requests.post(webhook, json=payload, timeout=15)
+    response = requests.post(webhook, json=payload, timeout=10)
     response.raise_for_status()
 
 
@@ -127,7 +110,7 @@ def collect_news():
         try:
             feed = feedparser.parse(url)
 
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:8]:
                 title = clean_text(entry.get("title", ""))
                 summary = clean_text(entry.get("summary", ""))
                 link = entry.get("link", "")
@@ -155,16 +138,22 @@ def format_news(items, limit=8):
     if not items:
         return "No relevant headlines detected."
 
+    seen = set()
     lines = []
-    for item in items[:limit]:
+
+    for item in items:
+        key = item["title"].lower()
+        if key in seen:
+            continue
+
+        seen.add(key)
         lines.append(f"- [{item['source']}] {item['title']}\n{item['link']}")
+
+        if len(lines) >= limit:
+            break
 
     return "\n\n".join(lines)
 
-
-# =========================
-# MARKET DATA
-# =========================
 
 def get_market_snapshot():
     rows = []
@@ -172,9 +161,9 @@ def get_market_snapshot():
     for name, symbol in MARKET_SYMBOLS.items():
         try:
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="2d", interval="1d")
+            hist = ticker.history(period="2d", interval="1d", timeout=10)
 
-            if hist.empty or len(hist) < 1:
+            if hist.empty:
                 continue
 
             last_close = hist["Close"].iloc[-1]
@@ -214,28 +203,19 @@ def format_market_snapshot(rows):
             display_price = f"{price:.2f}"
 
         emoji = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
-
-        lines.append(
-            f"{emoji} **{name}**: {display_price} ({change:+.2f}%)"
-        )
+        lines.append(f"{emoji} **{name}**: {display_price} ({change:+.2f}%)")
 
     return "\n".join(lines)
 
 
 def run_market_data():
     rows = get_market_snapshot()
-    body = format_market_snapshot(rows)
-
     send_discord(
         MARKET_DATA_WEBHOOK or MACRO_WEBHOOK,
         "📊 Market Data Snapshot",
-        body
+        format_market_snapshot(rows)
     )
 
-
-# =========================
-# ALERT MODES
-# =========================
 
 def run_brief():
     news = collect_news()
@@ -271,7 +251,7 @@ This is context, not a trade signal.
 
 **Trading checklist**
 - Check VIX.
-- Check US10Y and US2Y.
+- Check US10Y.
 - Check economic calendar.
 - Check Mag 7 premarket direction.
 - Check semiconductors.
@@ -296,13 +276,11 @@ def run_critical():
 def run_macro():
     news = collect_news()
     macro = [n for n in news if n["macro"]]
-
     rows = get_market_snapshot()
-    market_text = format_market_snapshot(rows)
 
     body = f"""
 **Market Data**
-{market_text}
+{format_market_snapshot(rows)}
 
 **Macro Headlines**
 {format_news(macro, 8)}
@@ -335,7 +313,6 @@ def run_earnings():
 
 def run_general():
     news = collect_news()
-
     send_discord(
         NEWS_WEBHOOK,
         "📰 General Market News",
@@ -368,10 +345,6 @@ def run_trump():
     except Exception as e:
         print(f"Trump feed error: {e}")
 
-
-# =========================
-# MAIN ROUTER
-# =========================
 
 if __name__ == "__main__":
     mode = os.getenv("MODE", "general")
