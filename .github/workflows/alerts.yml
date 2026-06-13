@@ -24,6 +24,31 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Decide mode
+        id: mode
+        run: |
+          echo "MODE=general" >> $GITHUB_ENV
+
+          if [ "${{ github.event.schedule }}" = "0 7 * * 1-5" ]; then
+            echo "MODE=market" >> $GITHUB_ENV
+          fi
+
+          if [ "${{ github.event.schedule }}" = "30 11 * * 1-5" ]; then
+            echo "MODE=brief" >> $GITHUB_ENV
+          fi
+
+          if [ "${{ github.event.schedule }}" = "30 12 * * 1-5" ]; then
+            echo "MODE=macro" >> $GITHUB_ENV
+          fi
+
+          if [ "${{ github.event.schedule }}" = "30 13 * * 1-5" ]; then
+            echo "MODE=critical" >> $GITHUB_ENV
+          fi
+
+          if [ "${{ github.event.schedule }}" = "15 7-21 * * 1-5" ]; then
+            echo "MODE=trump" >> $GITHUB_ENV
+          fi
+
       - name: Run alert script
         env:
           DISCORD_CRITICAL_WEBHOOK: ${{ secrets.DISCORD_CRITICAL_WEBHOOK }}
@@ -34,6 +59,6 @@ jobs:
           DISCORD_NEWS_WEBHOOK: ${{ secrets.DISCORD_NEWS_WEBHOOK }}
           DISCORD_TRUMP_WEBHOOK: ${{ secrets.DISCORD_TRUMP_WEBHOOK }}
           DISCORD_MARKET_DATA_WEBHOOK: ${{ secrets.DISCORD_MARKET_DATA_WEBHOOK }}
-          MODE: general
+          MODE: ${{ env.MODE }}
 
         run: python nq_alerts.py
