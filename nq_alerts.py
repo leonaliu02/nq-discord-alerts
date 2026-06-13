@@ -7,10 +7,6 @@ import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
-# =========================
-# DISCORD WEBHOOKS
-# =========================
-
 CRITICAL_WEBHOOK = os.getenv("DISCORD_CRITICAL_WEBHOOK")
 BRIEF_WEBHOOK = os.getenv("DISCORD_BRIEF_WEBHOOK")
 MACRO_WEBHOOK = os.getenv("DISCORD_MACRO_WEBHOOK")
@@ -19,10 +15,7 @@ EARNINGS_WEBHOOK = os.getenv("DISCORD_EARNINGS_WEBHOOK")
 NEWS_WEBHOOK = os.getenv("DISCORD_NEWS_WEBHOOK")
 TRUMP_WEBHOOK = os.getenv("DISCORD_TRUMP_WEBHOOK")
 MARKET_DATA_WEBHOOK = os.getenv("DISCORD_MARKET_DATA_WEBHOOK")
-
-# =========================
-# RSS FEEDS — CLEANED
-# =========================
+ECONOMIC_CALENDAR_WEBHOOK = os.getenv("DISCORD_ECONOMIC_CALENDAR")
 
 FEEDS = {
     "CNBC Markets": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
@@ -34,20 +27,12 @@ FEEDS = {
 
 TRUMP_FEED = "https://trumpstruth.org/feed"
 
-# =========================
-# MARKET SYMBOLS — REDUCED
-# =========================
-
 MARKET_SYMBOLS = {
     "NQ Futures": "NQ=F",
     "QQQ": "QQQ",
     "VIX": "^VIX",
     "US 10Y Yield": "^TNX",
 }
-
-# =========================
-# KEYWORDS
-# =========================
 
 CRITICAL_KEYWORDS = [
     "cpi", "ppi", "nfp", "nonfarm", "payrolls", "fomc", "powell",
@@ -87,9 +72,6 @@ GENERAL_KEYWORDS = list(set(
     ]
 ))
 
-# =========================
-# HELPERS
-# =========================
 
 def clean_text(text):
     text = html.unescape(text or "")
@@ -122,12 +104,10 @@ def is_recent_entry(entry, max_age_minutes=60):
 
     try:
         published_dt = parsedate_to_datetime(published)
-
         if published_dt.tzinfo is None:
             published_dt = published_dt.replace(tzinfo=timezone.utc)
 
-        now = datetime.now(timezone.utc)
-        return published_dt >= now - timedelta(minutes=max_age_minutes)
+        return published_dt >= datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
 
     except Exception:
         return True
@@ -142,7 +122,6 @@ def format_news(items, limit=8):
 
     for item in items:
         key = item["title"].lower().strip()
-
         if key in seen:
             continue
 
@@ -154,9 +133,6 @@ def format_news(items, limit=8):
 
     return "\n\n".join(lines)
 
-# =========================
-# NEWS COLLECTION
-# =========================
 
 def collect_news(max_age_minutes=60):
     items = []
@@ -192,9 +168,6 @@ def collect_news(max_age_minutes=60):
 
     return items
 
-# =========================
-# MARKET DATA
-# =========================
 
 def get_market_snapshot():
     rows = []
@@ -249,17 +222,49 @@ def format_market_snapshot(rows):
 
     return "\n".join(lines)
 
-# =========================
-# MODES
-# =========================
 
 def run_market_data():
     rows = get_market_snapshot()
-
     send_discord(
         MARKET_DATA_WEBHOOK or MACRO_WEBHOOK,
         "📊 Market Data Snapshot",
         format_market_snapshot(rows)
+    )
+
+
+def run_economic_calendar():
+    body = """
+📅 **Economic Calendar Check**
+
+This free version does not use a paid economic-calendar API. Treat this as a mandatory reminder to manually verify today's scheduled risk events.
+
+**Check these before trading NQ:**
+- CPI
+- PPI
+- NFP / Nonfarm Payrolls
+- FOMC rate decision
+- FOMC minutes
+- Powell / Fed speakers
+- ISM Manufacturing / Services
+- Retail Sales
+- Jobless Claims
+- Treasury auctions
+- University of Michigan inflation expectations
+
+**Manual calendar links:**
+- ForexFactory: https://www.forexfactory.com/calendar
+- Investing.com: https://www.investing.com/economic-calendar/
+- MarketWatch Calendar: https://www.marketwatch.com/economy-politics/calendar
+- Federal Reserve: https://www.federalreserve.gov/newsevents/calendar.htm
+
+**Trading instruction:**
+If tier-1 macro lands near your NQ execution window, do not treat the chart setup as clean. Macro overrides technicals.
+"""
+
+    send_discord(
+        ECONOMIC_CALENDAR_WEBHOOK or MACRO_WEBHOOK,
+        "📅 Economic Calendar Reminder",
+        body
     )
 
 
@@ -402,9 +407,6 @@ def run_trump():
     except Exception as e:
         print(f"Trump feed error: {e}")
 
-# =========================
-# ROUTER
-# =========================
 
 if __name__ == "__main__":
     mode = os.getenv("MODE", "general")
@@ -424,5 +426,7 @@ if __name__ == "__main__":
         run_market_data()
     elif mode == "trump":
         run_trump()
+    elif mode == "economic_calendar":
+        run_economic_calendar()
     else:
         run_general()
