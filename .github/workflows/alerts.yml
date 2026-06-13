@@ -1,0 +1,31 @@
+name: NQ Discord Alerts
+
+on:
+  workflow_dispatch:
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run alert script
+        env:
+          DISCORD_CRITICAL_WEBHOOK: ${{ secrets.DISCORD_CRITICAL_WEBHOOK }}
+          DISCORD_BRIEF_WEBHOOK: ${{ secrets.DISCORD_BRIEF_WEBHOOK }}
+          DISCORD_MACRO_WEBHOOK: ${{ secrets.DISCORD_MACRO_WEBHOOK }}
+          DISCORD_AI_SEMIS_WEBHOOK: ${{ secrets.DISCORD_AI_SEMIS_WEBHOOK }}
+          DISCORD_EARNINGS_WEBHOOK: ${{ secrets.DISCORD_EARNINGS_WEBHOOK }}
+          DISCORD_NEWS_WEBHOOK: ${{ secrets.DISCORD_NEWS_WEBHOOK }}
+          DISCORD_TRUMP_WEBHOOK: ${{ secrets.DISCORD_TRUMP_WEBHOOK }}
+          DISCORD_MARKET_DATA_WEBHOOK: ${{ secrets.DISCORD_MARKET_DATA_WEBHOOK }}
+          MODE: general
+
+        run: python nq_alerts.py
