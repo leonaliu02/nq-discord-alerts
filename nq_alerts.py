@@ -4,7 +4,12 @@ import html
 import requests
 import feedparser
 import yfinance as yf
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
+
+# =========================
+# DISCORD WEBHOOKS
+# =========================
 
 CRITICAL_WEBHOOK = os.getenv("DISCORD_CRITICAL_WEBHOOK")
 BRIEF_WEBHOOK = os.getenv("DISCORD_BRIEF_WEBHOOK")
@@ -15,31 +20,34 @@ NEWS_WEBHOOK = os.getenv("DISCORD_NEWS_WEBHOOK")
 TRUMP_WEBHOOK = os.getenv("DISCORD_TRUMP_WEBHOOK")
 MARKET_DATA_WEBHOOK = os.getenv("DISCORD_MARKET_DATA_WEBHOOK")
 
+# =========================
+# RSS FEEDS — CLEANED
+# =========================
+
 FEEDS = {
     "CNBC Markets": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     "CNBC Tech": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
     "MarketWatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
     "Federal Reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
-    "Nasdaq Markets": "https://www.nasdaq.com/feed/rssoutbound?category=Markets",
     "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
-    "Investing.com News": "https://www.investing.com/rss/news.rss",
-    "S&P Global": "https://www.spglobal.com/spdji/en/rss/",
 }
 
 TRUMP_FEED = "https://trumpstruth.org/feed"
+
+# =========================
+# MARKET SYMBOLS — REDUCED
+# =========================
 
 MARKET_SYMBOLS = {
     "NQ Futures": "NQ=F",
     "QQQ": "QQQ",
     "VIX": "^VIX",
     "US 10Y Yield": "^TNX",
-    "DXY": "DX-Y.NYB",
-    "NVDA": "NVDA",
-    "AMD": "AMD",
-    "MSFT": "MSFT",
-    "AAPL": "AAPL",
-    "META": "META",
 }
+
+# =========================
+# KEYWORDS
+# =========================
 
 CRITICAL_KEYWORDS = [
     "cpi", "ppi", "nfp", "nonfarm", "payrolls", "fomc", "powell",
@@ -47,14 +55,14 @@ CRITICAL_KEYWORDS = [
     "treasury yield", "10-year", "2-year", "bond yield",
     "vix", "volatility", "selloff", "crash",
     "war", "attack", "missile", "iran", "israel", "russia",
-    "china", "taiwan"
+    "china", "taiwan", "tariff", "sanctions"
 ]
 
 MACRO_KEYWORDS = [
     "fed", "federal reserve", "powell", "rates", "rate cut",
     "rate hike", "inflation", "cpi", "ppi", "nfp",
     "jobs report", "treasury", "yield", "10-year", "2-year",
-    "bond", "dollar", "dxy"
+    "bond", "dollar", "dxy", "tariff", "sanctions"
 ]
 
 AI_SEMIS_KEYWORDS = [
@@ -68,7 +76,7 @@ AI_SEMIS_KEYWORDS = [
 EARNINGS_KEYWORDS = [
     "earnings", "guidance", "revenue", "profit", "eps",
     "quarterly results", "reports results", "beats estimates",
-    "misses estimates"
+    "misses estimates", "outlook", "forecast"
 ]
 
 GENERAL_KEYWORDS = list(set(
@@ -79,6 +87,9 @@ GENERAL_KEYWORDS = list(set(
     ]
 ))
 
+# =========================
+# HELPERS
+# =========================
 
 def clean_text(text):
     text = html.unescape(text or "")
@@ -103,14 +114,62 @@ def matches(text, keywords):
     return any(k.lower() in text for k in keywords)
 
 
-def collect_news():
+def is_recent_entry(entry, max_age_minutes=60):
+    published = entry.get("published") or entry.get("updated") or entry.get("created")
+
+    if not published:
+        return True
+
+    try:
+        published_dt = parsedate_to_datetime(published)
+
+        if published_dt.tzinfo is None:
+            published_dt = published_dt.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        return published_dt >= now - timedelta(minutes=max_age_minutes)
+
+    except Exception:
+        return True
+
+
+def format_news(items, limit=8):
+    if not items:
+        return "No relevant headlines detected."
+
+    seen = set()
+    lines = []
+
+    for item in items:
+        key = item["title"].lower().strip()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        lines.append(f"- [{item['source']}] {item['title']}\n{item['link']}")
+
+        if len(lines) >= limit:
+            break
+
+    return "\n\n".join(lines)
+
+# =========================
+# NEWS COLLECTION
+# =========================
+
+def collect_news(max_age_minutes=60):
     items = []
 
     for source, url in FEEDS.items():
         try:
+            print(f"Reading feed: {source}")
             feed = feedparser.parse(url)
 
-            for entry in feed.entries[:8]:
+            for entry in feed.entries[:10]:
+                if not is_recent_entry(entry, max_age_minutes=max_age_minutes):
+                    continue
+
                 title = clean_text(entry.get("title", ""))
                 summary = clean_text(entry.get("summary", ""))
                 link = entry.get("link", "")
@@ -133,35 +192,18 @@ def collect_news():
 
     return items
 
-
-def format_news(items, limit=8):
-    if not items:
-        return "No relevant headlines detected."
-
-    seen = set()
-    lines = []
-
-    for item in items:
-        key = item["title"].lower()
-        if key in seen:
-            continue
-
-        seen.add(key)
-        lines.append(f"- [{item['source']}] {item['title']}\n{item['link']}")
-
-        if len(lines) >= limit:
-            break
-
-    return "\n\n".join(lines)
-
+# =========================
+# MARKET DATA
+# =========================
 
 def get_market_snapshot():
     rows = []
 
     for name, symbol in MARKET_SYMBOLS.items():
         try:
+            print(f"Fetching market data: {name}")
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="2d", interval="1d", timeout=10)
+            hist = ticker.history(period="2d", interval="1d", timeout=8)
 
             if hist.empty:
                 continue
@@ -207,9 +249,13 @@ def format_market_snapshot(rows):
 
     return "\n".join(lines)
 
+# =========================
+# MODES
+# =========================
 
 def run_market_data():
     rows = get_market_snapshot()
+
     send_discord(
         MARKET_DATA_WEBHOOK or MACRO_WEBHOOK,
         "📊 Market Data Snapshot",
@@ -218,7 +264,7 @@ def run_market_data():
 
 
 def run_brief():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
     rows = get_market_snapshot()
 
     critical = [n for n in news if n["critical"]]
@@ -262,7 +308,7 @@ This is context, not a trade signal.
 
 
 def run_critical():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
     critical = [n for n in news if n["critical"]]
 
     if critical:
@@ -271,10 +317,12 @@ def run_critical():
             "🔴 Critical Market Alert",
             format_news(critical, 6)
         )
+    else:
+        print("No critical headlines found.")
 
 
 def run_macro():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
     macro = [n for n in news if n["macro"]]
     rows = get_market_snapshot()
 
@@ -290,7 +338,7 @@ def run_macro():
 
 
 def run_ai_semis():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
     ai_semis = [n for n in news if n["ai_semis"]]
 
     send_discord(
@@ -301,7 +349,7 @@ def run_ai_semis():
 
 
 def run_earnings():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
     earnings = [n for n in news if n["earnings"]]
 
     send_discord(
@@ -312,7 +360,8 @@ def run_earnings():
 
 
 def run_general():
-    news = collect_news()
+    news = collect_news(max_age_minutes=60)
+
     send_discord(
         NEWS_WEBHOOK,
         "📰 General Market News",
@@ -322,32 +371,44 @@ def run_general():
 
 def run_trump():
     try:
+        print("Reading Trump feed")
         feed = feedparser.parse(TRUMP_FEED)
 
         if not feed.entries:
+            print("No Trump feed entries.")
             return
 
         lines = []
 
         for entry in feed.entries[:5]:
+            if not is_recent_entry(entry, max_age_minutes=60):
+                continue
+
             title = clean_text(entry.get("title", "Trump post"))
             summary = clean_text(entry.get("summary", ""))
             link = entry.get("link", "")
 
             lines.append(f"- {title}\n{summary[:300]}\n{link}")
 
-        send_discord(
-            TRUMP_WEBHOOK,
-            "🇺🇸 Trump Social Posts",
-            "\n\n".join(lines)
-        )
+        if lines:
+            send_discord(
+                TRUMP_WEBHOOK,
+                "🇺🇸 Trump Social Posts",
+                "\n\n".join(lines)
+            )
+        else:
+            print("No recent Trump posts.")
 
     except Exception as e:
         print(f"Trump feed error: {e}")
 
+# =========================
+# ROUTER
+# =========================
 
 if __name__ == "__main__":
     mode = os.getenv("MODE", "general")
+    print(f"Running mode: {mode}")
 
     if mode == "brief":
         run_brief()
