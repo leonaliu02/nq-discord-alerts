@@ -3,17 +3,30 @@ name: NQ Discord Alerts
 on:
   workflow_dispatch:
   schedule:
+    # UTC times. During UK summer time, UTC + 1 = UK time.
+
+    # Market snapshot: 08:00 UK
     - cron: "0 7 * * 1-5"
+
+    # Main NQ prep brief: 12:30 UK
     - cron: "30 11 * * 1-5"
+
+    # Macro/rates update: 13:30 UK
     - cron: "30 12 * * 1-5"
+
+    # Critical scan: 14:30 UK
     - cron: "30 13 * * 1-5"
+
+    # General market news hourly: 08:00–22:00 UK
     - cron: "0 7-21 * * 1-5"
+
+    # Trump posts hourly: 08:15–22:15 UK
     - cron: "15 7-21 * * 1-5"
 
 jobs:
   alerts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +38,6 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Decide mode
-        id: mode
         run: |
           echo "MODE=general" >> $GITHUB_ENV
 
